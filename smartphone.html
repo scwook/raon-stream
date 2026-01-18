@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Mobile WebRTC Camera Publisher</title>
+<style>
+    body { font-family: sans-serif; text-align: center; padding: 20px; }
+    video { width: 100%; max-width: 360px; background: #000; border-radius: 12px; }
+    button, select {
+        margin: 10px; padding: 12px 20px; font-size: 16px;
+        border-radius: 8px; border: none;
+        background: #007AFF; color: white; cursor: pointer;
+    }
+</style>
+</head>
+<body>
+
+<h2>📷 스마트폰 WebRTC 방송</h2>
+
+<video id="preview" autoplay playsinline muted></video>
+
+<br>
+
+<select id="cameraSelect"></select>
+<br>
+
+<button id="startBtn">카메라 켜기</button>
+<button id="publishBtn" disabled>방송 시작</button>
+
+<div id="status">준비됨</div>
+
+<script>
+const server = "192.168.131.216";   // ← 여기를 본인 SRS 주소로 변경
+const app = "live";
+const stream = "mobilecam";
+const whipUrl = `http://${server}:1985/rtc/v1/whip/?app=${app}&stream=${stream}`;
+
+let localStream = null;
+let pc = null;
+
+// 📌 카메라 목록 불러오기
+async function loadCameras() {
+try {
+        // 임시로 권한을 요청하여 장치 목록 접근 권한 확보
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        
+        // 사용 후 임시 스트림 정지
+        stream.getTracks().forEach(track => track.stop());
+
+        const cams = devices.filter(d => d.kind === "videoinput");
+        const select = document.getElementById("cameraSelect");
+        select.innerHTML = "";
+
+        cams.forEach(cam => {
+            const op = document.createElement("option");
+            op.value = cam.deviceId;
+            op.text = cam.label || `카메라 ${select.length + 1}`;
+            select.appendChild(op);
+        });
+    } catch (err) {
+        console.error("장치 목록을 가져올 수 없습니다:", err);
+        document.getElementById("status").innerText = "카메라 권한 필요 (HTTPS 확인)";
+    }
+}
+
+// 📌 카메라 시청 시작
+async function startCamera() {
+    const camId = document.getElementById("cameraSelect").value;
+
+    localStream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: camId ? { exact: camId } : undefined },
+        audio: true
+    });
+
+    document.getElementById("preview").srcObject = localStream;
+    document.getElementById("publishBtn").disabled = false;
+
+    document.getElementById("status").innerText = "카메라 연결됨";
+}
+
+// 📌 WebRTC + WHIP 송출
+async function publishStream() {
+    document.getElementById("status").innerText = "WebRTC 연결 중...";
+
+    pc = new RTCPeerConnection({
+        bundlePolicy: "max-bundle"
+    });
+
+    // Tracks 넣기
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+    // Offer 생성
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    // SRS WHIP API로 SDP 전송
+    const res = await fetch(whipUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp
+    });
+
+    const answerSdp = await res.text();
+
+    // answer 설정
+    await pc.setRemoteDescription({
+        type: "answer",
+        sdp: answerSdp
+    });
+
+    document.getElementById("status").innerText = "📡 방송 중";
+}
+
+document.getElementById("startBtn").onclick = startCamera;
+document.getElementById("publishBtn").onclick = publishStream;
+
+// 초기 카메라 목록 로드
+loadCameras();
+</script>
+
+</body>
+</html>

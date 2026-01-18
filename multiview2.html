@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>SRS Multi Video Player</title>
+    <style>
+        .video-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; padding: 20px; }
+        .video-container { background: #333; border-radius: 8px; overflow: hidden; color: white; }
+        video { width: 100%; aspect-ratio: 16/9; background: #000; }
+        h3 { margin: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <h2>SRS 다중 스트림 모니터링</h2>
+    <div class="video-grid" id="videoGrid"></div>
+    <button id="startAllBtn" style="margin: 20px; padding: 10px 20px;">모든 스트림 시작</button>
+
+    <script>
+        const serverIp = "192.168.131.216";
+        
+        // 재생할 스트림 리스트 (이름만 다르게 설정)
+        const streams = [
+            { name: "Camera 1", path: "live/livestream" },
+            { name: "Camera 2", path: "live/picam" },
+            { name: "Camera 3", path: "live/linux" },
+            { name: "Camera 4", path: "live/cam4" } // 기존 스트림
+        ];
+
+        // 개별 스트림 재생 함수
+        async function playStream(streamInfo, videoElement) {
+            const pc = new RTCPeerConnection({ bundlePolicy: "max-bundle" });
+
+            // 사파리 및 일반 브라우저 수신 설정
+            pc.addTransceiver("video", { direction: "recvonly" });
+            // 오디오가 있는 경우에만 추가 (라즈베리파이 카메라만 쓰면 보통 비디오만 하므로 주석 처리 권장)
+            // pc.addTransceiver("audio", { direction: "recvonly" });
+
+            pc.ontrack = (event) => {
+                if (videoElement.srcObject !== event.streams[0]) {
+                    videoElement.srcObject = event.streams[0];
+                    console.log(`${streamInfo.name} 트랙 수신됨`);
+                }
+            };
+
+            const apiUrl = `http://${serverIp}:1985/rtc/v1/play/`;
+            const streamUrl = `webrtc://${serverIp}/${streamInfo.path}`;
+
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        api: apiUrl, streamurl: streamUrl, sdp: offer.sdp
+                    })
+                });
+
+                const data = await response.json();
+                if (data.code !== 0) throw new Error("SRS 에러");
+
+                await pc.setRemoteDescription(new RTCSessionDescription({
+                    type: 'answer', sdp: data.sdp
+                }));
+
+                await videoElement.play();
+            } catch (e) {
+                console.error(`${streamInfo.name} 연결 실패:`, e);
+            }
+        }
+
+        // 페이지 초기화: 비디오 태그 생성
+        const grid = document.getElementById('videoGrid');
+        streams.forEach((s, index) => {
+            const container = document.createElement('div');
+            container.className = 'video-container';
+            container.innerHTML = `
+                <h3>${s.name} (${s.path})</h3>
+                <video id="video_${index}" autoplay muted playsinline controls></video>
+            `;
+            grid.appendChild(container);
+        });
+
+        // 버튼 클릭 시 모든 스트림 순차 재생
+        document.getElementById('startAllBtn').onclick = () => {
+            streams.forEach((s, index) => {
+                const videoEl = document.getElementById(`video_${index}`);
+                playStream(s, videoEl);
+            });
+        };
+    </script>
+</body>
+</html>

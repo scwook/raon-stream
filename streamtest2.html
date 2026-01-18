@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>SRS WebRTC Play Example</title>
+</head>
+<body>
+  <h2>SRS WebRTC Viewer</h2>
+  <video id="video" autoplay playsinline controls muted style="width: 100%; max-width: 800px;"></video>
+
+  <script>
+    async function startPlay() {
+      const pc = new RTCPeerConnection(null);
+
+      // [수정] 트랙 수신 설정: 이 코드가 createOffer 이전에 반드시 있어야 합니다.
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      pc.addTransceiver("video", { direction: "recvonly" });
+
+      const video = document.getElementById("video");
+      pc.ontrack = (event) => {
+        if (video.srcObject !== event.streams[0]) {
+          video.srcObject = event.streams[0];
+          console.log("스트림 수신 중...");
+        }
+      };
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const res = await fetch("http://192.168.131.216:1985/rtc/v1/play/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api: "http://192.168.131.216:1985/rtc/v1/play/",
+            streamurl: "webrtc://192.168.131.216/live/livestream",
+            sdp: offer.sdp
+          })
+        });
+
+        const data = await res.json();
+
+        // [수정] 서버 응답 코드 확인 (0이 성공)
+        if (data.code !== 0 || !data.sdp) {
+          console.error("SRS 서버 에러:", data);
+          return;
+        }
+
+        await pc.setRemoteDescription(
+          new RTCSessionDescription({
+            type: "answer",
+            sdp: data.sdp
+          })
+        );
+        console.log("연결 성공!");
+      } catch (e) {
+        console.error("WebRTC 프로세스 오류:", e);
+      }
+    }
+
+    // 브라우저 정책상 사용자 상호작용 후 재생이 권장되나, 
+    // 테스트를 위해 일단 호출 (muted 상태여야 자동재생 확률이 높음)
+    window.onload = startPlay;
+  </script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Mobile WebRTC Camera Publisher</title>
+    <style>
+        body { background-color: #0f0f0f; font-family: sans-serif; text-align: center; padding: 20px; color: white; }
+        video { width: 100%; max-width: 800px; aspect-ratio: 16/9; background: #000; border-radius: 12px; }
+        button, select, input { margin: 10px; padding: 12px 20px; font-size: 16px; border-radius: 8px; border: none; }
+        button { background: #007AFF; color: white; cursor: pointer; min-width: 120px; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #stopBtn { background: #FF3B30; display: none; } /* 중단 버튼 스타일 */
+        select, input { background: #333; color: white; border: 1px solid #555; }
+        .input-group { margin-bottom: 10px; }
+    </style>
+</head>
+
+<body>
+
+    <h2>COSMOS Web Streaming</h2>
+
+    <video id="preview" autoplay playsinline muted></video>
+
+    <div class="input-group">
+        <input type="text" id="streamName" placeholder="스트림 이름 입력" value="mobilecam">
+        <select id="cameraSelect"></select>
+    </div>
+
+    <button id="startBtn">카메라 켜기</button>
+    <button id="publishBtn" disabled>방송 시작</button>
+    <button id="stopBtn">방송 중단</button>
+
+    <div id="status">준비됨</div>
+
+    <script>
+        const server = "192.168.131.216"; // SRS 주소
+        const app = "live";
+        
+        let localStream = null;
+        let pc = null;
+
+        // 📌 카메라 목록 불러오기
+        async function loadCameras() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                stream.getTracks().forEach(track => track.stop());
+
+                const cams = devices.filter(d => d.kind === "videoinput");
+                const select = document.getElementById("cameraSelect");
+                select.innerHTML = "";
+                cams.forEach(cam => {
+                    const op = document.createElement("option");
+                    op.value = cam.deviceId;
+                    op.text = cam.label || `카메라 ${select.length + 1}`;
+                    select.appendChild(op);
+                });
+            } catch (err) {
+                console.error("장치 목록 에러:", err);
+                document.getElementById("status").innerText = "카메라 권한을 확인해주세요.";
+            }
+        }
+
+        // 📌 카메라 켜기
+        async function startCamera() {
+            const camId = document.getElementById("cameraSelect").value;
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: camId ? { ideal: camId } : undefined },
+                    audio: true
+                });
+                document.getElementById("preview").srcObject = localStream;
+                document.getElementById("publishBtn").disabled = false;
+                document.getElementById("status").innerText = "카메라 연결됨";
+            } catch (err) {
+                document.getElementById("status").innerText = `카메라 에러: ${err.name}`;
+            }
+        }
+
+        // 📌 방송 시작 (WebRTC + WHIP)
+        async function publishStream() {
+            const streamName = document.getElementById("streamName").value.trim();
+            if (!streamName) {
+                alert("스트림 이름을 입력해주세요.");
+                return;
+            }
+
+            const whipUrl = `https://${server}:1988/rtc/v1/whip/?app=${app}&stream=${streamName}`;
+            document.getElementById("status").innerText = "방송 연결 중...";
+
+            try {
+                pc = new RTCPeerConnection({ bundlePolicy: "max-bundle" });
+
+                // 트랙 추가
+                localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                const res = await fetch(whipUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/sdp" },
+                    body: offer.sdp
+                });
+
+                if (!res.ok) throw new Error("서버 응답 에러");
+
+                const answerSdp = await res.text();
+                await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+
+                // UI 전환
+                document.getElementById("status").innerText = `📡 방송 중: ${streamName}`;
+                document.getElementById("publishBtn").style.display = "none";
+                document.getElementById("stopBtn").style.display = "inline-block";
+                document.getElementById("streamName").disabled = true;
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById("status").innerText = "방송 시작 실패";
+            }
+        }
+
+        // 📌 방송 중단 로직
+        function stopPublishing() {
+            // 1. PeerConnection 닫기
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+
+            // 2. UI 복구
+            document.getElementById("status").innerText = "방송 중단됨";
+            document.getElementById("publishBtn").style.display = "inline-block";
+            document.getElementById("stopBtn").style.display = "none";
+            document.getElementById("streamName").disabled = false;
+            
+            // 참고: 카메라 자체를 끄고 싶다면 아래 주석 해제
+            /*
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                document.getElementById("preview").srcObject = null;
+                document.getElementById("publishBtn").disabled = true;
+            }
+            */
+        }
+
+        document.getElementById("startBtn").onclick = startCamera;
+        document.getElementById("publishBtn").onclick = publishStream;
+        document.getElementById("stopBtn").onclick = stopPublishing;
+
+        loadCameras();
+    </script>
+</body>
+</html>

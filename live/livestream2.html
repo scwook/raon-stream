@@ -5,14 +5,60 @@
     <meta charset="UTF-8">
     <title>Mobile WebRTC Camera Publisher</title>
     <style>
-        body { background-color: #0f0f0f; font-family: sans-serif; text-align: center; padding: 20px; color: white; }
-        video { width: 100%; max-width: 800px; aspect-ratio: 16/9; background: #000; border-radius: 12px; }
-        button, select, input { margin: 10px; padding: 12px 20px; font-size: 16px; border-radius: 8px; border: none; }
-        button { background: #007AFF; color: white; cursor: pointer; min-width: 120px; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        #stopBtn { background: #FF3B30; display: none; } /* 중단 버튼 스타일 */
-        select, input { background: #333; color: white; border: 1px solid #555; }
-        .input-group { margin-bottom: 10px; }
+        body {
+            background-color: #0f0f0f;
+            font-family: sans-serif;
+            text-align: center;
+            padding: 20px;
+            color: white;
+        }
+
+        video {
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 12px;
+        }
+
+        button,
+        select,
+        input {
+            margin: 10px;
+            padding: 12px 20px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: none;
+        }
+
+        button {
+            background: #007AFF;
+            color: white;
+            cursor: pointer;
+            min-width: 120px;
+        }
+
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        #stopBtn {
+            background: #FF3B30;
+            display: none;
+        }
+
+        /* 중단 버튼 스타일 */
+        select,
+        input {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+        }
+
+        .input-group {
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 
@@ -20,10 +66,10 @@
 
     <h2>COSMOS Web Streaming</h2>
 
-    <video id="preview" autoplay playsinline muted></video>
+    <video id="preview" autoplay playsinline muted controls></video>
 
     <div class="input-group">
-        <input type="text" id="streamName" placeholder="스트림 이름 입력" value="mobilecam">
+        <input type="text" id="streamName" placeholder="스트림 이름 입력">
         <select id="cameraSelect"></select>
     </div>
 
@@ -34,9 +80,9 @@
     <div id="status">준비됨</div>
 
     <script>
-        const server = "192.168.131.216"; // SRS 주소
+        const server = "192.168.135.242"; // SRS 주소
         const app = "live";
-        
+
         let localStream = null;
         let pc = null;
 
@@ -64,21 +110,41 @@
 
         // 📌 카메라 켜기
         async function startCamera() {
-            const camId = document.getElementById("cameraSelect").value;
+            const select = document.getElementById("cameraSelect");
+            const camId = select.value;
+            const camLabel = select.options[select.selectedIndex].text.toLowerCase();
+
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
             }
 
+            // 모바일 대응을 위한 제약 조건 설정
+            const constraints = {
+                video: {
+                    // deviceId가 있으면 exact로 강제 지정, 없으면 기본값
+                    deviceId: camId ? { exact: camId } : undefined,
+                    // 라벨에 'back'이나 '후면'이 포함되어 있으면 후면 모드 힌트 제공
+                    facingMode: (camLabel.includes("back") || camLabel.includes("후면") || camLabel.includes("rear"))
+                        ? "environment" : "user"
+                },
+                audio: true
+            };
+
             try {
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: { deviceId: camId ? { ideal: camId } : undefined },
-                    audio: true
-                });
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
                 document.getElementById("preview").srcObject = localStream;
                 document.getElementById("publishBtn").disabled = false;
                 document.getElementById("status").innerText = "카메라 연결됨";
             } catch (err) {
-                document.getElementById("status").innerText = `카메라 에러: ${err.name}`;
+                console.error("카메라 전환 에러:", err);
+                // 'exact'로 실패할 경우(일부 구형 기기) 다시 유연하게 시도
+                if (err.name === "OverconstrainedError" || err.name === "ConstraintNotSatisfiedError") {
+                    document.getElementById("status").innerText = "설정 오류, 기본 모드로 재시도...";
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    document.getElementById("preview").srcObject = localStream;
+                } else {
+                    document.getElementById("status").innerText = `카메라 에러: ${err.name}`;
+                }
             }
         }
 
@@ -138,7 +204,7 @@
             document.getElementById("publishBtn").style.display = "inline-block";
             document.getElementById("stopBtn").style.display = "none";
             document.getElementById("streamName").disabled = false;
-            
+
             // 참고: 카메라 자체를 끄고 싶다면 아래 주석 해제
             /*
             if (localStream) {
@@ -156,4 +222,5 @@
         loadCameras();
     </script>
 </body>
+
 </html>

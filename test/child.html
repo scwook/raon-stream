@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>데이터 받는 페이지</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f9f9f9; }
+        #result-list { font-weight: bold; color: blue; }
+    </style>
+</head>
+<body>
+    <h2>전달받은 데이터</h2>
+    <div id="display-area">
+        <p>선택하신 항목은 다음과 같습니다:</p>
+        <ul id="result-list">
+            </ul>
+    </div>
+
+    <script>
+        // 페이지 로드 시 URL 파라미터 확인
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const items = urlParams.get('items');
+
+            const listElement = document.getElementById('result-list');
+
+            if (items) {
+                // 쉼표를 기준으로 다시 배열로 분리
+                const itemList = items.split(',');
+
+                // 각 항목을 <li> 태그로 만들어 추가
+                itemList.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    listElement.appendChild(li);
+                });
+            } else {
+                listElement.innerHTML = "<li>전달된 데이터가 없습니다.</li>";
+            }
+        };
+    </script>
+</body>
+</html>
